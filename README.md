@@ -1,3 +1,3 @@
 # practicalmachinelearning
 Repository for PML
-link to html page is https://johnrusnak100.github.io/practicalmachinelearning/PMLfinalproject.html
+LINK TO FINAL PROJECT HTML PAGE is https://johnrusnak100.github.io/practicalmachinelearning/PMLfinalproject.html
