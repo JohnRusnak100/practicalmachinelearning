@@ -1,0 +1,150 @@
+---
+title: "Practical Machine Learning Predictions"
+author: "John Rusnak"
+date: "November 4, 2016"
+output:
+  html_document: 
+    fig_caption: yes
+    keep_md: yes
+  pdf_document:
+    fig_caption: yes
+subtitle: 'using HAR weight lifting dataset'
+geometry: margin=0.5in
+---
+
+##Synopsis
+Per the final project page,using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions: exactly according to the specification (Class A), throwing the elbows to the front (Class B), lifting the dumbbell only halfway (Class C), lowering the dumbbell only halfway (Class D) and throwing the hips to the front (Class E). The goal of this project was to predict the manner in which they did the exercise. This is the "classe" variable in the training set. 
+
+After some data cleansing and "tidying up",we will investigate the accuracy of using two models, each utilizing cross validation with 2 K-folds, in predicting the values of the "classe" variable. The first approach used rpart to develop a decision tree and was minimally accurate at 48%. Much greater accuracy was achieved using a random forest approach which resulted in 99% accuracy. 
+
+## Loading the required files, libraries used and preparing the data files for analysis 
+### Load libraries and data files
+
+```{r library,message=FALSE,warning=FALSE}
+library(caret)
+library(ggplot2)
+library(rattle)
+```
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment. 
+The training data for this project are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+The following code downloads the csv files and reads them into the train and testing data frames.
+```{r data load}
+url1<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+url2<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url1,destfile="pml-training.csv",method="curl")
+download.file(url2,destfile="pml-testing.csv",method="curl")
+train<-read.csv("pml-training.csv",na.strings=c("NA",""),stringsAsFactors=F)
+testing<-read.csv("pml-testing.csv",na.strings=c("NA",""),stringsAsFactors=F)
+```
+### Preparing the train data frame for analysis
+We confirm that the train and testing data frames have the same potential predictor variables. We see that only train contains the "classe" variable, while only testing contains the "problem_id". All other predictor variables are in both. So all is good.
+```{r check var}
+setdiff(names(train),names(testing))
+setdiff(names(testing),names(train))
+```
+We will now cleanup the train data frame. First we will remove the first seven variables, such as obs #,user name and time stamps,etc. These variables do not contribute to predicting classe. Second, we remove the variables with near zero variance. These variables also do not contribute to explaining or predicting the classe variable.
+```{r not necessary and nzv}
+train<-train[,-(1:7)] 
+nzv<-nearZeroVar(train)
+train<-train[, -nzv]
+```
+
+Now we will look at variables where the majority of observation as NA. 
+```{r na columns}
+NAcolsum<-apply(train,2,function(x) sum(is.na(x)))
+table(NAcolsum)
+```
+We see that there are 53 variables with no NAs and 58 variables where 19216,out of 19622 rows, are NA. We will keep the 53 variables with no NAs. and call the resulting data frame trainfinal.
+```{r keep no NAs}
+NAcolsum<-apply(train,2,function(x) sum(is.na(x))==0)
+trainfinal<-train[,NAcolsum]
+```
+### Partition the trainfinal data frame into training and training validation data frames.
+```{r partition}
+set.seed(3579)
+inTrain = createDataPartition(trainfinal$classe, p = 0.7,list=F)
+training = trainfinal[ inTrain,]
+testval = trainfinal[-inTrain,]
+training$classe<-as.factor(training$classe)
+testval$classe<-as.factor(testval$classe)
+```
+The testing data frame that was downloaded does not include the classe variable since it will be used for the prediction quiz as part of this project. So we randomly partition the trainfinal data frame into training(training) and testing(testval) using the createDataPartition on the classe variable with a 70/30 split. We then set the classe variable in each df as a factor. Lets look at the proportion of the classe variable in each data frame using the prop.table function. We see that performing the exercise exactly to specification(A) occurs about 28% while the other 4 are in the 16% to 19% range for both data frames
+```{r classe table}
+round(prop.table(table(training$classe)),2)
+round(prop.table(table(testval$classe)),2)
+```
+
+## Model prediction methodology, accuracy analysis and preparing testing data frame for predictions
+Given the categorical nature of the classe variable, it seems natural to investigate the use of classification prediction models such as decision trees(will use rpart) and ensemble of tress(will use random forest). Each modelling methodology will include the use of a 2 k-fold cross validation process in an effort to reduce variability. Each of the two cross validation partitions will alternately be used for training and testing the model and the validation results are averaged over the rounds.
+Lets use rpart to model a decision tree and view the decision tree using the following code:
+```{r rpart model,fig.cap="Figure 1: Decision Tree using rpart",fig.height=4.5,message=FALSE,warning=FALSE}
+modfit<-train(classe ~ .,method="rpart",data=training,
+              trControl=trainControl(method="cv",number=2))
+fancyRpartPlot(modfit$finalModel)
+```
+The tree shows roll_belt,pitch_forearm,and magnet_dumbbell_y,etc as the important predictor variables. Time to check accuracy of the model on the testval data frame.
+```{r rpart test}
+confusionMatrix(testval$classe,predict(modfit,testval))$table
+confusionMatrix(testval$classe,predict(modfit,testval))$overall[1]
+```
+We see that overall accuracy is only about 48%. With accuracy at such a low level, lets move on to predicting with an ensemble of trees using the random forest approach. Lets generate the model and check accuracy. Because of processing time on my old Mac laptop,I'm going to limit the number of trees to 10 instead of the default of 500. 
+```{r rf model,message=FALSE,warning=FALSE}
+rf_model<-train(classe ~ .,data=training,method='rf',ntree=10,importance=T,
+                        trControl=trainControl(method="cv",number=2))
+confusionMatrix(testval$classe,predict(rf_model,testval))$table
+acc<-confusionMatrix(testval$classe,predict(rf_model,testval))$overall
+acc
+```
+We see that accuracy has tremendously improved to almost 99% with 10 trees using only a 2 k-fold cross validation! Lets look at this model in a little bit more detail. First we'll plot the model rf_model
+```{r rf pred,fig.cap="Figure 2: Optimal Predictor Values",fig.height=4.5}
+plot(rf_model)
+```
+We see that cross-validation accuracy peaked at using 27 out of the 52 potential predictors. Lets look at the top 10 predictors.
+```{r rf imp,fig.cap="Figure 3: Top 10 Predictor Variables by Classe",fig.height=4.5}
+plot(varImp(rf_model),top=10)
+```
+The plot shows the importance of each of the top ten predictors by classe. The variables roll_belt and pitch_forearm are two of the top predictors based on the above plot. Lets look at a scatter plot of these two predictors with the point colors being the classe.
+```{r scatterplot, fig.cap="Figure 4: Scatterplot roll_belt and pitch_forearm"}
+qplot(pitch_forearm,roll_belt,data=training,color=classe)
+```
+We do not see 5 distinct clusters of classe,rather it looks more like 2 segments of muddled clustering. Hence the need for using 10 trees and 27 predictor variables
+
+## Out of sample error rate estimate
+Reminder the accuracy of the rf_model was as follows
+```{r acc}
+acc
+```
+Based on the above upper and lower accuracy results for the random forest model on the testval data we would expect our out of sample error rate to be in the range `r round((1-acc[4])*100,2)`% to `r round((1-acc[3])*100,2)`%
+
+## Prepare testing data frame for quiz predictions
+The quiz portion of the final project entails predicting the classe value for the testing data frame.
+We will make the predictions using the random forest model rf_model. First we must make the same adjustments to the testing data frame that we made to the training data frame which was used to train the model.
+
+1) Remove variables not needed
+```{r remove unwant from testing}
+testing<-testing[,-(1:7)]
+```
+2) Remove the same near zero variance columns that were removed from training
+```{r remove nzv}
+testing<-testing[, -nzv] 
+```
+3) Remove the same columns that were mostly NA in training
+```{r remove NA}
+testing<-testing[,NAcolsum] 
+```
+As earlier, lets use setdiff to check all columns are the same except for classe and problem_id
+```{r setdiff}
+setdiff(names(training),names(testing))
+setdiff(names(testing),names(training))
+```
+## Classe predictions for quiz using the testing data frame and rf_model.
+```{r quiz pred}
+predict(rf_model,newdata=testing)
+```
+The answers resulted in 20/20 correct answers in the final project quiz
+
+## Conclusions
+This was a good assignment that put into practice some of the methodologies of the practical machine learning course as well as previous courses. I found it interesting that both models, the decision tree using rpart and the random forest model both identified roll_belt and pitch_forearm as two of the top predictor variables(Figures 1 and 3). The accuracy of a single decision tree resulted in accuracy of only 48%, whereas with an ensemble of 10 trees using the random forest approach improved accuracy to near perfect at 99%.
